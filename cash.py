@@ -3,8 +3,7 @@ import telebot
 from telebot import types
 import sqlite3
 
-# ১. বটের কনফিগারেশন এবং টোকেন সেটআপ
-BOT_TOKEN = "8924250554:AAFRKaBOlxkgcUtWBAiT2DOMs7k1mEF6Cm0"
+# ১. বটের কনফি
 ADMIN_ID = 5547760831  # আপনার অ্যাডমিন আইডি
 
 UPDATE_CHANNEL = "@new_update100"
@@ -21,9 +20,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
-            first_name TEXT,
-            balance REAL DEFAULT 1000.0,
-            status TEXT DEFAULT 'inactive',
+            f,
             referred_by INTEGER DEFAULT NULL,
             ref_bonus_credited INTEGER DEFAULT 0
         )
