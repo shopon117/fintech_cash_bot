@@ -3,7 +3,7 @@ import telebot
 from telebot import types
 import sqlite3
 
-# ১. বটের কনফিগারেশন এবং টোকেন সেটআপ (আপনার আসল টোকেন ও আইডি এখানে বসানো আছে)
+# ১. বটের কনফিগারেশন এবং টোকেন সেটআপ
 BOT_TOKEN = "8924250554:AAFRKaBOlxkgcUtWBAiT2DOMs7k1mEF6Cm0"
 ADMIN_ID = 5547760831  # আপনার অ্যাডমিন আইডি
 
@@ -12,10 +12,11 @@ PROOF_CHANNEL = "@new_proof100"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ২. ডেটাবেজ সেটআপ (সাইন-আপ বোনাস ১০০০ টাকা ডিফল্ট)
+# ২. ডেটাবেজ সেটআপ (ইউজার এবং ওয়ালেট নম্বরের জন্য আলাদা টেবিল)
 def init_db():
     conn = sqlite3.connect('fintech_wallet.db')
     cursor = conn.cursor()
+    # ইউজার টেবিল
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -27,10 +28,31 @@ def init_db():
             ref_bonus_credited INTEGER DEFAULT 0
         )
     ''')
+    # ওয়ালেট নম্বর ম্যানেজমেন্ট টেবিল
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wallet_numbers (
+            method TEXT PRIMARY KEY,
+            number TEXT
+        )
+    ''')
+    # ডিফল্ট নম্বর সেট করা (যদি ডেটাবেজে আগে থেকে না থাকে)
+    cursor.execute("INSERT OR IGNORE INTO wallet_numbers (method, number) VALUES ('বিকাশ', '01833084108')")
+    cursor.execute("INSERT OR IGNORE INTO wallet_numbers (method, number) VALUES ('নগদ', '01833084108')")
+    cursor.execute("INSERT OR IGNORE INTO wallet_numbers (method, number) VALUES ('রকেট', '018330841088')")
+    
     conn.commit()
     conn.close()
 
 init_db()
+
+# নির্দিষ্ট মেথডের নম্বর ডেটাবেজ থেকে নিয়ে আসার ফাংশন
+def get_wallet_number(method):
+    conn = sqlite3.connect('fintech_wallet.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT number FROM wallet_numbers WHERE method = ?", (method,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else "সেট করা হয়নি"
 
 # channel জয়েন চেক করার ফাংশন
 def check_joined(user_id):
@@ -56,7 +78,7 @@ def join_keyboard():
     markup.row(btn3)
     return markup
 
-# প্রধান মেনু কীবোর্ড (কোনো ইমোজি নেই, ১০০% ফিক্সড টেক্সট)
+# প্রধান মেনু কীবোর্ড 
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton('আমার প্রোফাইল')
@@ -109,7 +131,7 @@ def send_welcome(message):
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=join_keyboard())
 
-# ইনলাইন বাটন (চ্যানেল ভেরিфикации) হ্যান্ডলার
+# ইনলাইন বাটন হ্যান্ডলার
 @bot.callback_query_handler(func=lambda call: call.data == "check_channels")
 def callback_check_channels(call):
     user_id = call.from_user.id
@@ -117,29 +139,29 @@ def callback_check_channels(call):
         bot.delete_message(call.message.chat.id, call.message.message_id)
         bot.send_message(
             call.message.chat.id, 
-            "অনভিন্দন! আপনি সফলভাবে আমাদের চ্যানেলে যুক্ত হয়েছেন। এখন আপনি বটের সকল ফিচার ব্যবহার করতে পারবেন।", 
+            "অভিনন্দন! আপনি সফলভাবে আমাদের চ্যানেলে যুক্ত হয়েছেন। এখন আপনি বটের সকল ফিচার ব্যবহার করতে পারবেন।", 
             reply_markup=main_menu()
         )
     else:
         bot.answer_callback_query(call.id, "আপনি এখনো দুটি চ্যানেলে জয়েন করেননি! দয়া করে দুটি চ্যানেলেই জয়েন করুন।", show_alert=True)
 
-# ৩. অ্যাডমিন প্যানেল কমান্ড
+
+# ==================== অ্যাডমিন প্যানেল কমান্ডস ====================
+
+# ১. ইউজার অ্যাকাউন্ট একটিভ করার কমান্ড
 @bot.message_handler(commands=['active_user'])
 def admin_activate_user(message):
     if message.from_user.id != ADMIN_ID:
         return
-        
     try:
         target_user_id = int(message.text.split()[1])
-        
         conn = sqlite3.connect('fintech_wallet.db')
         cursor = conn.cursor()
-
         cursor.execute("SELECT status, referred_by, ref_bonus_credited FROM users WHERE user_id = ?", (target_user_id,))
         user_info = cursor.fetchone()
 
         if not user_info:
-            bot.reply_to(message, f"ইউজার আইডি {target_user_id} ডাটাবেজে পাওয়া যায়নি!")
+            bot.reply_to(message, f"ইউজার আইডি {target_user_id} ডেটাবেজে পাওয়া যায়নি!")
             conn.close()
             return
 
@@ -149,16 +171,14 @@ def admin_activate_user(message):
             return
 
         cursor.execute("UPDATE users SET status = 'active' WHERE user_id = ?", (target_user_id,))
-        
         referred_by = user_info[1]
         ref_bonus_credited = user_info[2]
         
         if referred_by and ref_bonus_credited == 0:
             cursor.execute("UPDATE users SET balance = balance + 40 WHERE user_id = ?", (referred_by,))
             cursor.execute("UPDATE users SET ref_bonus_credited = 1 WHERE user_id = ?", (target_user_id,))
-            
             try:
-                bot.send_message(referred_by, f"অনভিন্দন! আপনার আমন্ত্রিত ইউজার (ID: {target_user_id}) অ্যাকাউন্ট অ্যাক্টিভ করায় আপনার ব্যালেন্সে ৪০ টাকা রেফার বোনাস যোগ হয়েছে!")
+                bot.send_message(referred_by, f"অভিনন্দন! আপনার আমন্ত্রিত ইউজার (ID: {target_user_id}) অ্যাকাউন্ট অ্যাক্টিভ করায় আপনার ব্যালেন্সে ৪০ টাকা রেফার বোনাস যোগ হয়েছে!")
             except Exception:
                 pass
                 
@@ -168,28 +188,88 @@ def admin_activate_user(message):
                 level2_referrer = level2_data[0]
                 cursor.execute("UPDATE users SET balance = balance + 20 WHERE user_id = ?", (level2_referrer,))
                 try:
-                    bot.send_message(level2_referrer, f"অনভিন্দন! আপনার লেভেল-২ রেফারেল ইউজার অ্যাকাউন্ট অ্যাক্টিভ করায় আপনার ব্যালেন্সে ২০ টাকা বোনাস যোগ হয়েছে!")
+                    bot.send_message(level2_referrer, f"অভিনন্দন! আপনার লেভেল-২ রেফারেল ইউজার অ্যাকাউন্ট অ্যাক্টিভ করায় আপনার ব্যালেন্সে ২০ টাকা বোনাস যোগ হয়েছে!")
                 except Exception:
                     pass
                     
         conn.commit()
         conn.close()
-        
         bot.reply_to(message, f"ইউজার {target_user_id} এর অ্যাকাউন্ট সফলভাবে অ্যাক্টিভ করা হয়েছে।")
-        
         try:
-            bot.send_message(target_user_id, "অনভিন্দন! অ্যাডমিন আপনার পেমেন্ট ভেরিফাই করে আপনার অ্যাকাউন্টটি সম্পূর্ণ অ্যাক্টিভ করে দিয়েছেন। এখন আপনার রেফারেল লিংক এবং উইথড্র সিস্টেম কাজ করবে।")
+            bot.send_message(target_user_id, "অভিনন্দন! অ্যাডমিন আপনার পেমেন্ট ভেরিফাই করে আপনার অ্যাকাউন্টটি সম্পূর্ণ অ্যাক্টিভ করে দিয়েছেন। এখন আপনার রেফারেল লিংক এবং উইথড্র সিস্টেম কাজ করবে।")
         except Exception:
             pass
+    except Exception as e:
+        bot.reply_to(message, f"ত্রুটি: {str(e)}")
+
+# ২. অ্যাডমিন প্যানেল থেকে সরাসরি বিকাশ/নগদ/রকেট নম্বর পরিবর্তন করার ডাইনামিক কমান্ড
+@bot.message_handler(commands=['set_number'])
+def admin_set_number(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        args = message.text.split(maxsplit=2)
+        method = args[1]
+        new_no = args[2]
+        
+        if method not in ['বিকাশ', 'নগদ', 'রকেট']:
+            bot.reply_to(message, "❌ ভুল মেথড! মেথড শুধুমাত্র 'বিকাশ', 'নগদ' অথবা 'রকেট' হতে হবে।")
+            return
             
+        conn = sqlite3.connect('fintech_wallet.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO wallet_numbers (method, number) VALUES (?, ?)", (method, new_no))
+        conn.commit()
+        conn.close()
+        
+        bot.reply_to(message, f"✅ সফলভাবে আপনার {method} নম্বরটি পরিবর্তন করে `{new_no}` করা হয়েছে।", parse_mode="Markdown")
     except IndexError:
-        bot.reply_to(message, "ভুল ফরম্যাট! সঠিক নিয়ম: /active_user USER_ID")
-    except ValueError:
-        bot.reply_to(message, "ভুল ইউজার আইডি! আইডিটি শুধুমাত্র সংখ্যায় হতে হবে।")
+        bot.reply_to(message, "❌ ভুল ফরম্যাট! সঠিক নিয়ম: `/set_number [বিকাশ/নগদ/রকেট] [নতুন_নম্বর]`", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"একটি ত্রুটি ঘটেছে: {str(e)}")
 
-# ৪. টেক্সট মেসেজ এবং বাটন লজিক হ্যান্ডলার
+# ৩. অ্যাডমিন দ্বারা উইথড্রাল অনুমোদন ও ব্যালেন্স মাইনাস করার কমান্ড
+@bot.message_handler(commands=['approve_withdraw'])
+def admin_approve_withdraw(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        args = message.text.split()
+        target_user_id = int(args[1])
+        amount = float(args[2])
+        
+        conn = sqlite3.connect('fintech_wallet.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (target_user_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            bot.reply_to(message, "❌ এই ইউজার আইডিটি ডেটাবেজে পাওয়া যায়নি।")
+            conn.close()
+            return
+            
+        current_balance = row[0]
+        if current_balance < amount:
+            bot.reply_to(message, f"❌ রিকোয়েস্ট বাতিল! পর্যাপ্ত ব্যালেন্স নেই। বর্তমান ব্যালেন্স: {current_balance} টাকা।")
+            conn.close()
+            return
+            
+        new_balance = current_balance - amount
+        cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, target_user_id))
+        conn.commit()
+        conn.close()
+        
+        bot.reply_to(message, f"✅ সফলভাবে ইউজার `{target_user_id}` এর অ্যাকাউন্ট থেকে {amount} টাকা কেটে নেওয়া হয়েছে।", parse_mode="Markdown")
+        try:
+            bot.send_message(target_user_id, f"🎉 অভিনন্দন! আপনার {amount} টাকা উত্তোলনের (Withdraw) রিকোয়েস্টটি অ্যাডমিন দ্বারা সফলভাবে অনুমোদিত (Approved) হয়েছে এবং আপনার বটের ওয়ালেট ব্যালেন্স থেকে টাকা কেটে নেওয়া হয়েছে।")
+        except Exception:
+            pass
+    except Exception as e:
+        bot.reply_to(message, f"ত্রুটি: {str(e)}")
+
+
+# ==================== টেক্সট মেসেজ এবং বাটন লজিক হ্যান্ডলার ====================
+
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     user_id = message.from_user.id
@@ -223,13 +303,13 @@ def handle_messages(message):
             f"নাম: {message.from_user.first_name}\n"
             f"ইউজার আইডি: {message.from_user.id}\n"
             f"আপনার মোট ব্যালেন্স: {current_balance:.2f} টাকা (১০০০ টাকা বোনাসসহ)\n"
-            f"একটিভ রেফারেল: {active_refers} জন\n"
+            f"অ্যাক্টিভ রেফারেল: {active_refers} জন\n"
             f"অ্যাকাউন্ট স্ট্যাটাস: {status_text}\n\n"
-            "নোট: অ্যাকাউন্ট ইন-অ্যাক্টিভ থাকলে রেফারেল কমিশন ব্যালেন্সে যোগ হবে না এবং উইথড্র করা যাবে না"
+            "নোট: অ্যাকাউন্ট ইন-অ্যাক্টিভ থাকলে রেফারেল কমিশন ব্যালেন্সে যোগ হবে না এবং উইথড্র করা যাবে না।"
         )
         bot.send_message(message.chat.id, profile_text)
 
-    # ২. রেফার করুন বাটন লজিক (১০০% ক্র্যাশ-প্রুফ ফিক্সড সেকশন)
+    # ২. রেফার করুন বাটন লজিক
     elif user_text == 'রেফার করুন':
         conn = sqlite3.connect('fintech_wallet.db')
         cursor = conn.cursor()
@@ -240,16 +320,16 @@ def handle_messages(message):
         refer_link = f"https://t.me/ss_fintech_cash_bot?start={user_id}"
         refer_text = (
             "Fintech Cash Wallet রেফারেল প্রোগ্রাম\n\n"
-            f"আপনার মোট একটিভ রেফারেল: {total_refers} জন\n\n"
+            f"আপনার মোট অ্যাক্টিভ রেফারেল: {total_refers} জন\n\n"
             f"আপনার ইউনিক রেফারেল লিংক:\n{refer_link}\n\n"
-            "রেফারেল কমিশন সিস্টেম:\n"
+            "...রেফারেল কমিশন সিস্টেম...\n"
             "লেভেল ১ (সরাসরি রেফার) -> ৪০ টাকা বোনাস!\n"
             "লেভেল ২ (বন্ধুর বন্ধু রেফার) -> ২০ টাকা বোনাস!\n\n"
             "গুরুত্বপূর্ণ নিয়ম: আপনি যাকে রেফার করবেন, সে ১০০ টাকা দিয়ে তার অ্যাকাউন্ট অ্যাক্টিভ করলেই কেবল আপনার ব্যালেন্সে রেফারের টাকা যোগ হবে। সে অ্যাক্টিভ না করা পর্যন্ত কোনো বোনাস পাবেন না।"
         )
         bot.send_message(message.chat.id, refer_text, disable_web_page_preview=True)
 
-    # ৩. উইথড্র বাটন লজিক
+    # ৩. উইথড্র বাটন লজিক (নিখুঁত মাইনাস ব্যালেন্স ফিক্সড লজিক)
     elif user_text == 'উইথড্র':
         conn = sqlite3.connect('fintech_wallet.db')
         cursor = conn.cursor()
@@ -260,7 +340,7 @@ def handle_messages(message):
         active_refers = cursor.fetchone()[0]
         conn.close()
         
-        current_balance = user_data[0] if user_data else 1000.0
+        current_balance = user_data[0] if user_data else 0.0
         account_status = user_data[1] if user_data else 'inactive'
 
         if account_status != 'active':
@@ -272,66 +352,99 @@ def handle_messages(message):
             bot.send_message(message.chat.id, withdraw_lock_text)
             return
 
+        # উত্তোলনযোগ্য ব্যালেন্স হিসাব
         if active_refers < 20:
-            withdrawable_balance = current_balance - 1000.0
-            
-            if withdrawable_balance < 100:
-                withdraw_text = (
-                    "Fintech Cash Wallet উইথড্রাল সিস্টেম\n\n"
-                    f"💵 আপনার মোট ব্যালেন্স: {current_balance:.2f} টাকা\n"
-                    f"🔒 লকড বোনাস ব্যালেন্স: 1000.00 টাকা (২০টি একটিভ রেফার হলে আনলক হবে)\n"
-                    f"💵 আপনার উত্তোলনযোগ্য রেফারের ব্যালেন্স: {withdrawable_balance:.2f} টাকা\n"
-                    "সর্বনিম্ন উইথড্র পরিমাণ: ১০০ টাকা\n\n"
-                    "নোট: আপনার সাইন-আপ বোনাসের ১০০০ টাকা তুলতে হলে আপনাকে অবশ্যই ২০টি সফল (Active) রেফার কমপ্লিট করতে হবে। তবে রেফারের টাকা ১০০ টাকা হলেই আপনি যেকোনো সময় তুলে নিতে পারবেন।"
-                )
-                bot.send_message(message.chat.id, withdraw_text)
+            if current_balance < 1000.0:
+                withdrawable_balance = current_balance
+                lock_balance = 0.0
             else:
-                bot.send_message(
-                    message.chat.id, 
-                    f"উইথড্র করার জন্য আপনার বিকাশ/নগদ/রকেট নম্বর এবং অ্যামাউন্টটি আমাদের সাপোর্ট আইডিতে পাঠান।\n\n"
-                    f"আপনার বর্তমান উত্তোলনযোগ্য ব্যালেন্স: {withdrawable_balance:.2f} টাকা।\n"
-                    f"নোট: আপনার অ্যাকাউন্টের ১০০০ টাকা সাইন-আপ বোনাসটি লক রয়েছে, কারণ আপনার একটিভ রেফার ২০ জনের কম ({active_refers}/20)"
-                )
+                withdrawable_balance = current_balance - 1000.0
+                lock_balance = 1000.0
         else:
-            if current_balance < 100:
-                bot.send_message(message.chat.id, f"দুঃখিত! উইথড্র করার জন্য আপনার অ্যাকাউন্টে সর্বনিম্ন ১০০ টাকা ব্যালেন্স থাকতে হবে। আপনার বর্তমান ব্যালেন্স: {current_balance:.2f} টাকা।")
-            else:
-                bot.send_message(
-                    message.chat.id, 
-                    f"অনভিন্দন! আপনার ২০টির বেশি একটিভ রেফার থাকায় আপনার সাইন-আপ বোনাসসহ সমস্ত টাকা আনলক হয়ে গেছে।\n\n"
-                    f"আপনার মোট উত্তোলনযোগ্য ব্যালেন্স: {current_balance:.2f} টাকা।\n"
-                    f"টাকা তোলার জন্য আপনার পেমেন্ট নম্বর ও অ্যামাউন্ট লিখে নিচের সাপোর্ট বাটনে ক্লিক করে অ্যাডমিনকে পাঠান।"
-                )
+            withdrawable_balance = current_balance
+            lock_balance = 0.0
 
-    # ৪. অ্যাক্টিভ বাটন লজিক
+        # সর্বনিম্ন উইথড্র পরিমাণ ১০০ টাকা নিশ্চিত করা
+        if withdrawable_balance < 100:
+            withdraw_text = (
+                "Fintech Cash Wallet উইথড্রাল সিস্টেম\n\n"
+                f"💵 আপনার মোট ব্যালেন্স: {current_balance:.2f} টাকা\n"
+                f"🔒 লকড বোনাস ব্যালেন্স: {lock_balance:.2f} টাকা (২০টি অ্যাক্টিভ রেফার হলে আনলক হবে)\n"
+                f"💵 আপনার উত্তোলনযোগ্য রেফারের ব্যালেন্স: {withdrawable_balance:.2f} টাকা\n"
+                "সর্বনিম্ন উইথড্র পরিমাণ: ১০০ টাকা\n\n"
+                "নোট: আপনার সাইন-আপ বোনাসের ১০০০ টাকা তুলতে হলে আপনাকে অবশ্যই ২০টি সফল (Active) রেফার কমপ্লিট করতে হবে। তবে রেফারের টাকা ১০০ টাকা হলেই আপনি যেকোনো সময় তুলে নিতে পারবেন।"
+            )
+            bot.send_message(message.chat.id, withdraw_text)
+            return
+        else:
+            msg = bot.send_message(
+                message.chat.id, 
+                f"আপনার বর্তমান উত্তোলনযোগ্য ব্যালেন্স: {withdrawable_balance:.2f} টাকা।\n\n"
+                "টাকা তোলার জন্য আপনার পেমেন্ট মেথডের নাম (বিকাশ/নগদ/রকেট), নম্বর এবং টাকার পরিমাণ একসাথে লিখে পাঠান।\n\n"
+                "যেমন: বিকাশ - ০১৮XXXXXXXX - ১০০ টাকা"
+            )
+            bot.register_next_step_handler(msg, process_withdraw_submission, withdrawable_balance)
+
+    # ৪. অ্যাক্টিভ বাটন লজিক (ডেটাবেজ থেকে নম্বর নিয়ে আসার ডাইনামিক সেটআপ)
     elif user_text == 'অ্যাক্টিভ':
+        bkash_no = get_wallet_number('বিকাশ')
+        nagad_no = get_wallet_number('নগদ')
+        rocket_no = get_wallet_number('রকেট')
+        
         active_text = (
             "Fintech Cash Wallet অ্যাকাউন্ট অ্যাক্টিভেশন\n\n"
             "আপনার অ্যাকাউন্টটি সম্পূর্ণ ভেরিফাইড এবং লাইফটাইম অ্যাক্টিভ করতে মাত্র ১০০ টাকা ওয়ান-টাইম ফি প্রদান করতে হবে।\n\n"
             "নিচের যেকোনো একটি অ্যাকাউন্টে ১০০ টাকা Send Money করুন:\n"
-            "বিকাশ (Personal): 01833084108\n"
-            "নগদ (Personal): 01833084108\n"
-            "রকেট (Personal): 018330841088\n\n"
+            f"বিকাশ (Personal): {bkash_no}\n"
+            f"নগদ (Personal): {nagad_no}\n"
+            f"রকেট (Personal): {rocket_no}\n\n"
             "টাকা পাঠানোর পর করণীয়:\n"
-            "টাকা সফলভাবে পাঠানোর পর, পেমেন্টের Transaction ID (TrxID) এবং যে নম্বর থেকে টাকা পাঠিয়েছেন তা কপি করে নিচের সাপোর্ট বাটনে ক্লিক করে অ্যাডমিনকে সরাসরি মেসেজ দিন।"
+            "টাকা সফলভাবে পাঠানোর পর, পেমেন্টের Transaction ID (TrxID) এবং যে নম্বর থেকে টাকা পাঠিয়েছেন তা কপি করে নিচের সাপোর্ট বাটন এ ক্লিক করে অ্যাডমিন কে সরাসরি মেসেজ দিন।"
         )
         bot.send_message(message.chat.id, active_text)
 
-    # ৫. সাপোর্ট বাটন লজিক
+    # ৫.サポート বাটন লজিক
     elif user_text == 'সাপোর্ট':
         support_text = (
             "Fintech Cash Wallet হেল্প ও কাস্টমার সাপোর্ট\n\n"
-            "আপনার অ্যাকাউন্ট অ্যাক্টিভেশন, পেমেন্ট ভেরিфикации, উইথড্র বা অন্য যেকোনো সমস্যার দ্রুত সমাধানের জন্য নিচের বাটনে ক্লিক করে সরাসরি আমাদের অ্যাডমিন আইডিতে মেসেজ দিন:\n\n"
+            "আপনার অ্যাকাউন্ট অ্যাক্টিভেশন, পেমেন্ট ভেরিফাই, উইথড্র বা অন্য যেকোনো সমস্যার দ্রুত সমাধানের জন্য নিচের বাটনে ক্লিক করে সরাসরি আমাদের অ্যাডমিন আইডিতে মেসেজ দিন:\n\n"
             "নোট: কাইন্ডলি মেসেজ দেওয়ার পর কিছুক্ষণ অপেক্ষা করুন, আমাদের টিম দ্রুত আপনার পেমেন্ট বা সমস্যা চেক করে সমাধান করে দেবে।"
         )
         
         markup_support = types.InlineKeyboardMarkup()
-        btn_admin = types.InlineKeyboardButton("💬 অ্যাডমিনকে মেসেজ দিন", url="tg://user?id=5547760831")
+        btn_admin = types.InlineKeyboardButton("💬 অ্যাডমিনকে মেসেজ দিন", url=f"tg://user?id={ADMIN_ID}")
         markup_support.add(btn_admin)
         
         bot.send_message(message.chat.id, support_text, reply_markup=markup_support)
 
+# উইথড্রাল সাবমিশন প্রসেস ফাংশন 
+def process_withdraw_submission(message, max_withdrawable):
+    user_id = message.chat.id
+    submission_text = message.text
+
+    if submission_text.startswith('/') or len(submission_text) < 5:
+        bot.send_message(user_id, "❌ উত্তোলন প্রক্রিয়া বাতিল করা হয়েছে বা ভুল বিবরণ দেওয়া হয়েছে।")
+        return
+
+    bot.send_message(
+        user_id, 
+        "✅ আপনার উত্তোলন (Withdrawal) রিকোয়েস্টটি সফলভাবে গ্রহণ করা হয়েছে।\n"
+        "আগামী ১ ঘণ্টার মধ্যে আপনার দেওয়া একাউন্টে টাকা পৌঁছে যাবে। ধন্যবাদ আমাদের সাথে থাকার জন্য।"
+    )
+    
+    admin_alert = (
+        f"🔔 **নতুন উইথড্র রিকোয়েস্ট এসেছে!**\n\n"
+        f"👤 ইউজার আইডি: `{user_id}`\n"
+        f"📝 ইউজারের নাম: {message.from_user.first_name}\n"
+        f"💰 সর্বোচ্চ উত্তোলনযোগ্য ছিল: {max_withdrawable:.2f} টাকা\n"
+        f"📊 প্রেরিত বিবরণ: {submission_text}\n\n"
+        f"টাকা বাইরে থেকে পাঠানোর পর বটের ব্যালেন্স কাটতে নিচের কমান্ডটি কপি করে পাঠান:\n"
+        f"`/approve_withdraw {user_id} টাকার_পরিমাণ`"
+    )
+    bot.send_message(ADMIN_ID, admin_alert, parse_mode="Markdown")
+
 # বট চালু করা
 if __name__ == '__main__':
-    print("Fintech Cash Wallet Bot is running perfectly with zero error risks...")
+    print("Fintech Cash Wallet Bot is running perfectly with dynamic number setup...")
     bot.infinity_polling()
+    
